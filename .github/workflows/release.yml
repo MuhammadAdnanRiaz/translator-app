@@ -1,0 +1,90 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            args: '--target aarch64-apple-darwin'   # Apple Silicon
+          - platform: macos-latest
+            args: '--target x86_64-apple-darwin'    # Intel Mac
+          - platform: ubuntu-22.04
+            args: ''
+          - platform: windows-latest
+            args: ''
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: Cache Rust build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Install Linux system dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build and publish release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Prolingo ${{ github.ref_name }}'
+          releaseBody: |
+            ## Prolingo ${{ github.ref_name }}
+
+            ### Installation
+
+            1. Download the installer for your platform below
+            2. Install [llama.cpp](https://github.com/ggerganov/llama.cpp/releases) and add it to your PATH
+            3. Download a GGUF model (see [README](https://github.com/${{ github.repository }}#2-download-a-gguf-model))
+            4. Launch Prolingo and point it to your model file
+
+            ### Downloads
+
+            | Platform | File |
+            |----------|------|
+            | macOS Apple Silicon | `Prolingo_aarch64.dmg` |
+            | macOS Intel | `Prolingo_x64.dmg` |
+            | Windows | `Prolingo_x64-setup.exe` or `.msi` |
+            | Linux | `Prolingo_amd64.AppImage` or `.deb` |
+
+            ---
+            See the [README](https://github.com/${{ github.repository }}#readme) for full setup instructions.
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}
